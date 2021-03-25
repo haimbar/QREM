@@ -1,0 +1,6 @@
+doc
+Meta
+^.*\.Rproj$
+.Rproj.user
+.DS_Store
+.Rhistory
