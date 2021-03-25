@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1576785496525.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "2505844732",
+    "id" : "C3BD0315",
+    "lastKnownWriteTime" : 1576786586,
+    "last_content_update" : 1576786586501,
+    "path" : "~/Dropbox (Personal)/Packages/QREM/R/QREM.R",
+    "project_path" : "R/QREM.R",
+    "properties" : {
+        "cursorPosition" : "90,22",
+        "scrollLine" : "88"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

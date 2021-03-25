@@ -1,0 +1,62 @@
+library(SEMMS)
+library(QREM)
+# The riboflavin data
+#
+# Fit QREM on a good subset of the predictors, X_L
+# loop:
+#   classify above/below
+#   run SEMMS (binary)
+#   update X_L
+#   run QREM
+
+fn <- "Projects/QTL/VariableSelection/Code/DataAnalysis/riboflavindata/riboflavin1.csv"
+dataYXZ <- readInputFile(fn, ycol=1, Zcols=2:4089,
+                         addIntercept = TRUE, twoWay = FALSE)
+nn <- 8 # initial guess for the number of non-nulls
+distribution <- "gaussian"
+rnd <- F
+fittedSEMMS <- fitSEMMS(dataYXZ, mincor=0.8, nn=nn, minchange=1,
+                        distribution="N",verbose=F,rnd=rnd)
+foundSEMMS <- sort(union(which(fittedSEMMS$gam.out$lockedOut != 0),
+                         fittedSEMMS$gam.out$nn))
+fittedGLM <- runLinearModel(dataYXZ,fittedSEMMS$gam.out$nn, "N")
+print(summary(fittedGLM$mod))
+plotMDS(dataYXZ, fittedSEMMS, fittedGLM, ttl="riboflavin Data")
+plotFit(fittedGLM)
+
+
+qn = 0.25
+rnd = F
+
+# loop:
+
+res <- list()
+for (i in 1:100) {
+  cat(i,"...\n")
+  #dfQ <- data.frame(cbind(dataYXZ$Y, dataYXZ$Z[,foundSEMMS]))
+  dfQ <- data.frame(cbind(dataYXZ$Y, dataYXZ$Z[,fittedSEMMS$gam.out$nn]))
+  colnames(dfQ)[1] = "Y"
+  qremFit <- QREMVS("lm",linmod = Y~., dframe = dfQ, qn = qn)
+  
+  qremFit <- QREM("lm",linmod = Y~., dframe = dfQ, qn = qn)
+  posvals <- which(qremFit$ui > 0)
+  negvals <- which(qremFit$ui <= 0)
+
+  nn <- max(length(fittedSEMMS$gam.out$nn) + 3, 5)
+  dataYXZt <- dataYXZ
+  dataYXZt$Y <- as.numeric(qremFit$ui > 0)
+  fittedSEMMS <- fitSEMMS(dataYXZt, mincor=0.8, nn=nn, minchange=1,
+                          distribution="B",verbose=F,rnd=rnd)
+  foundSEMMS <- sort(union(which(fittedSEMMS$gam.out$lockedOut != 0),
+                           fittedSEMMS$gam.out$nn))
+  fittedGLM <- runLinearModel(dataYXZt,fittedSEMMS$gam.out$nn, "B")
+  print(summary(fittedGLM$mod))
+  #plotMDS(dataYXZ, fittedSEMMS, fittedGLM, ttl="riboflavin Data")
+  res[[i]] <- negvals#fittedSEMMS$gam.out$nn#foundSEMMS
+}
+
+unq <- unique(sort(unlist(res)))
+fn <- "Projects/QTL/VariableSelection/Code/DataAnalysis/riboflavindata/riboflavin1.csv"
+dataYXZ <- readInputFile(fn, ycol=1, Zcols=1+unq,
+                         addIntercept = TRUE, twoWay = TRUE)
+

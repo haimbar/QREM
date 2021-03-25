@@ -1,0 +1,14 @@
+Package: QREM
+Type: Package
+Title: Quantile Regression via the EM algorithm
+Version: 0.1.2
+Date: 2019-12-19
+Author: Haim Bar
+Maintainer: Haim Bar <haim.bar@uconn.edu>
+Depends: KernSmooth, lme4, parallel, gam
+Description: Quantile Regression Modelling via Location and
+    Scale Mixtures of Normal Distributions.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.0.2

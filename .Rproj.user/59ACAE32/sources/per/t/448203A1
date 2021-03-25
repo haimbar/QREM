@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1575151515192.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "1918667690",
+    "id" : "448203A1",
+    "lastKnownWriteTime" : 1575150434,
+    "last_content_update" : 1575150434,
+    "path" : "~/Dropbox/B12.R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "13,61",
+        "scrollLine" : "0"
+    },
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
