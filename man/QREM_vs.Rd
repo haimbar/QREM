@@ -12,7 +12,9 @@ QREM_vs(
   qn,
   nn = 5,
   nnset = NULL,
-  maxRep = 40
+  maxRep = 40,
+  initWithEdgeFinder = FALSE,
+  mincor = 0.75
 )
 }
 \arguments{
@@ -31,6 +33,10 @@ QREM_vs(
 \item{nnset}{Optional: instead of an initial number of candidates, can specify the column numbers in the Z matrix for the first iteration. Default is null.}
 
 \item{maxRep}{The maximum number of iterations between QREM and fitSEMMS. Default=40.}
+
+\item{initWithEdgeFinder}{Determines whether to use the edgefinder package to find highly correlated pairs of predictors (default=FALSE).}
+
+\item{mincor}{To be passed to the fitSEMMS function (the minimum correlation coefficient between pairs of putative variable, over which they are considered highly correlated). Default is 0.75.}
 }
 \description{
 Use the SEMMS package to perform variable selection. Iteratively alternate between QREM and fitSEMMS.
