@@ -364,45 +364,43 @@ flatQQplot <- function(x, evalx, M, qns, L=21, minRatio=0,maxRatio=2, filename=N
 #' dfsemms <- simLargeP[,c(1, 1+res$fittedSEMMS$gam.out$nn)]
 #' qremFit <- QREM(lm, y~., dfsemms, qn=qn)
 #' ests <- rbind(qremFit$coef$beta,
-#'          sqrt(diag(bcov(qremFit,linmod=y~., df=dfsemms, qn=0.2))))
+#'          sqrt(diag(bcov(qremFit,linmod=y~., df=dfsemms, qn=qn))))
 #' rownames(ests) <- c("Estimate","s.d")
 #' }
 QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, maxRep=40,initWithEdgeFinder=FALSE, mincor = 0.75) {
+  if(!(class(inputData) %in% c("data.frame","character"))) {
+    stop("Invalid input type:",class(inputData), "\n")
+  }
   if (class(inputData) == "data.frame") {
     filename <- tempfile(pattern = "forsemms_",fileext = ".RData")
     save(inputData, file=filename)
   } else {
     filename <- inputData
   }
+  if(!file.exists(filename)) {
+    stop("File doesn't exist:", filename,"\n")
+  }
   dataYXZ <- readInputFile(filename, ycol=ycol, Xcols = Xcols, Zcols=Zcols)
   y0 <- scale(dataYXZ$Y)
   if(initWithEdgeFinder) {
     M <- t(cbind(y0, dataYXZ$Z))
-    effit <- edgefinder(M, BHthr = 1e-3, LOvals = 100)
+    effit <- edgefinder(M, BHthr = max(1e-6, 1/choose(nrow(M),2)), LOvals = 100)
     subgr <- graphComponents(effit$AdjMat[-1,-1], minCtr = 2)
     Zcols <- sort(c(which(subgr$clustNo == 0), which(subgr$iscenter ==1)))
+    if (!is.null(nnset)) {
+      Zcols <- sort(union(nnset, Zcols))
+      nnset <- which(Zcols %in% nnset)
+    } else {
+      if(length(which(effit$AdjMat[1,setdiff(Zcols,1)] != 0) > 0))
+        nnset <- which(effit$AdjMat[1,setdiff(Zcols,1)] != 0)
+    }
     dat0 <- dataYXZ
     dataYXZ$Z <- dat0$Z[,Zcols]
     dataYXZ$K <- length(Zcols)
     dataYXZ$originalZnames <- dat0$originalZnames[Zcols]
     dataYXZ$colnamesZ <- dat0$colnamesZ[Zcols]
-    if(is.null(nnset))
-      nnset <- which(effit$AdjMat[1,-1] != 0)
-    if(length(nnset) > 0) {
-      nns <- rep(0, dataYXZ$K)
-      nns[nnset] <- 1
-      nnset <- which(nns[Zcols] == 1)
-    }
   }
-  if (!is.null(nnset)) {
-    inits <- list(discard = rep(-1, dataYXZ$K), beta = rep(0, dataYXZ$K))
-    initsTmp <- initVals(as.matrix(dataYXZ$Z[, nnset], nrow = length(y0),
-                                   ncol = length(nnset)), y0, mincor = mincor)
-    inits$discard[nnset] <- initsTmp$discard
-    inits$beta[nnset] <- initsTmp$beta
-    initNN <- nnset
-  }
-  else {# get the initial set of predictors, if not provided
+  if (is.null(nnset)) { # get the initial set of predictors, if not provided
     zval <- rep(0, dataYXZ$K)
     rnd <- sample(dataYXZ$K, replace=FALSE)
     m <- 5
@@ -417,7 +415,6 @@ QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, max
     }
     nnset <- order(abs(zval),decreasing = TRUE)[1:nn]
   }
-
   prev_ll <- 0
   for (repno in 1:maxRep) {
     # create a subset of the selected columns and run QREM
@@ -429,11 +426,12 @@ QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, max
     new_ll <- sum(qremFit$ui*(qn - as.numeric(qremFit$ui < 0)))
     if (abs(prev_ll - new_ll) < 1e-3) {
       if(initWithEdgeFinder) {
-        if (length(fittedVSnew$gam.out$nn) > 0)
-          fittedVSnew$gam.out$nn <- Zcols[fittedVSnew$gam.out$nn]
-        fittedVSnew$gam.out$lockedOut <- rep(0, dat0$K)
         A <- effit$AdjMat
-        A[1, fittedVSnew$gam.out$nn+1] <- A[fittedVSnew$gam.out$nn+1, 1] <- 1
+        if (length(fittedVSnew$gam.out$nn) > 0){
+          fittedVSnew$gam.out$nn <- Zcols[fittedVSnew$gam.out$nn]
+          A[1, fittedVSnew$gam.out$nn+1] <- A[fittedVSnew$gam.out$nn+1, 1] <- 1
+        }
+        fittedVSnew$gam.out$lockedOut <- rep(0, dat0$K)
         lout <- setdiff(which((A + A%*%A)[1,] > 0), 1)
         fittedVSnew$gam.out$lockedOut[setdiff(lout-1, fittedVSnew$gam.out$nn)] <- 1
         fittedVSnew$inits$discard <- rep(-1, dat0$K)
@@ -449,11 +447,12 @@ QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, max
                             nnset=nnset, minchange = 1, maxst = 20,
                             initWithEdgeFinder=FALSE)
     if(initWithEdgeFinder) {
-      if (length(fittedVSnew$gam.out$nn) > 0)
-        fittedVSnew$gam.out$nn <- Zcols[fittedVSnew$gam.out$nn]
-      fittedVSnew$gam.out$lockedOut <- rep(0, dat0$K)
       A <- effit$AdjMat
-      A[1, fittedVSnew$gam.out$nn+1] <- A[fittedVSnew$gam.out$nn+1, 1] <- 1
+      if (length(fittedVSnew$gam.out$nn) > 0) {
+        fittedVSnew$gam.out$nn <- Zcols[fittedVSnew$gam.out$nn]
+        A[1, fittedVSnew$gam.out$nn+1] <- A[fittedVSnew$gam.out$nn+1, 1] <- 1
+      }
+      fittedVSnew$gam.out$lockedOut <- rep(0, dat0$K)
       lout <- setdiff(which((A + A%*%A)[1,] > 0), 1)
       fittedVSnew$gam.out$lockedOut[setdiff(lout-1, fittedVSnew$gam.out$nn)] <- 1
       fittedVSnew$inits$discard <- rep(-1, dat0$K)

@@ -1,7 +1,7 @@
 Package: QREM
 Type: Package
 Title: Quantile Regression via the EM algorithm
-Version: 0.1.7
+Version: 0.1.8
 Author: Haim Bar
 Maintainer: Haim Bar <haim.bar@uconn.edu>
 Depends: R (>= 4.0.0), parallel, KernSmooth, lme4, gam, SEMMS, corpcor

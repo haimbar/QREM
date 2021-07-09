@@ -49,7 +49,7 @@ res <- QREM_vs(simLargeP, 1, 2:51, qn=qn)
 dfsemms <- simLargeP[,c(1, 1+res$fittedSEMMS$gam.out$nn)]
 qremFit <- QREM(lm, y~., dfsemms, qn=qn)
 ests <- rbind(qremFit$coef$beta,
-         sqrt(diag(bcov(qremFit,linmod=y~., df=dfsemms, qn=0.2))))
+         sqrt(diag(bcov(qremFit,linmod=y~., df=dfsemms, qn=qn))))
 rownames(ests) <- c("Estimate","s.d")
 }
 }
