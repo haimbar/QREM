@@ -352,6 +352,8 @@ flatQQplot <- function(x, evalx, M, qns, L=21, minRatio=0,maxRatio=2, filename=N
 #' @param nn The initial value for the number of non-null variables in SEMMS. Default is 5.
 #' @param nnset Optional: instead of an initial number of candidates, can specify the column numbers in the Z matrix for the first iteration. Default is null.
 #' @param maxRep The maximum number of iterations between QREM and fitSEMMS. Default=40.
+#' @param initWithEdgeFinder Determines whether to use the edgefinder package to find highly correlated pairs of predictors (default=FALSE).
+#' @param mincor To be passed to the fitSEMMS function (the minimum correlation coefficient between pairs of putative variable, over which they are considered highly correlated). Default is 0.75.
 #' @importFrom SEMMS fitSEMMS readInputFile
 #' @export
 #' @examples
@@ -365,16 +367,42 @@ flatQQplot <- function(x, evalx, M, qns, L=21, minRatio=0,maxRatio=2, filename=N
 #'          sqrt(diag(bcov(qremFit,linmod=y~., df=dfsemms, qn=0.2))))
 #' rownames(ests) <- c("Estimate","s.d")
 #' }
-QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, maxRep=40) {
+QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, maxRep=40,initWithEdgeFinder=FALSE, mincor = 0.75) {
   if (class(inputData) == "data.frame") {
     filename <- tempfile(pattern = "forsemms_",fileext = ".RData")
     save(inputData, file=filename)
   } else {
     filename <- inputData
   }
-  #cat(filename,class(filename),"\n",ycol,"\n")
   dataYXZ <- readInputFile(filename, ycol=ycol, Xcols = Xcols, Zcols=Zcols)
-  if (is.null(nnset)) { # get the initial set of predictors, if not provided
+  y0 <- scale(dataYXZ$Y)
+  if(initWithEdgeFinder) {
+    M <- t(cbind(y0, dataYXZ$Z))
+    effit <- edgefinder(M, BHthr = 1e-3, LOvals = 100)
+    subgr <- graphComponents(effit$AdjMat[-1,-1], minCtr = 2)
+    Zcols <- sort(c(which(subgr$clustNo == 0), which(subgr$iscenter ==1)))
+    dat0 <- dataYXZ
+    dataYXZ$Z <- dat0$Z[,Zcols]
+    dataYXZ$K <- length(Zcols)
+    dataYXZ$originalZnames <- dat0$originalZnames[Zcols]
+    dataYXZ$colnamesZ <- dat0$colnamesZ[Zcols]
+    if(is.null(nnset))
+      nnset <- which(effit$AdjMat[1,-1] != 0)
+    if(length(nnset) > 0) {
+      nns <- rep(0, dataYXZ$K)
+      nns[nnset] <- 1
+      nnset <- which(nns[Zcols] == 1)
+    }
+  }
+  if (!is.null(nnset)) {
+    inits <- list(discard = rep(-1, dataYXZ$K), beta = rep(0, dataYXZ$K))
+    initsTmp <- initVals(as.matrix(dataYXZ$Z[, nnset], nrow = length(y0),
+                                   ncol = length(nnset)), y0, mincor = mincor)
+    inits$discard[nnset] <- initsTmp$discard
+    inits$beta[nnset] <- initsTmp$beta
+    initNN <- nnset
+  }
+  else {# get the initial set of predictors, if not provided
     zval <- rep(0, dataYXZ$K)
     rnd <- sample(dataYXZ$K, replace=FALSE)
     m <- 5
@@ -400,39 +428,40 @@ QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, max
     qremFit <- QREM(lm, linmod, dframetmp, qn, maxInvLambda = 1000)
     new_ll <- sum(qremFit$ui*(qn - as.numeric(qremFit$ui < 0)))
     if (abs(prev_ll - new_ll) < 1e-3) {
-      if (length(fittedVSnew$gam.out$nn) > 0)
-        fittedVSnew$gam.out$nn <- Zcols0[fittedVSnew$gam.out$nn]
-      fittedVSnew$gam.out$A <- A
-      fittedVSnew$gam.out$lockedOut <- initlockedout
+      if(initWithEdgeFinder) {
+        if (length(fittedVSnew$gam.out$nn) > 0)
+          fittedVSnew$gam.out$nn <- Zcols[fittedVSnew$gam.out$nn]
+        fittedVSnew$gam.out$lockedOut <- rep(0, dat0$K)
+        A <- effit$AdjMat
+        A[1, fittedVSnew$gam.out$nn+1] <- A[fittedVSnew$gam.out$nn+1, 1] <- 1
+        lout <- setdiff(which((A + A%*%A)[1,] > 0), 1)
+        fittedVSnew$gam.out$lockedOut[setdiff(lout-1, fittedVSnew$gam.out$nn)] <- 1
+        fittedVSnew$inits$discard <- rep(-1, dat0$K)
+        fittedVSnew$gam.out$A <- effit$AdjMat
+      }
       return(list(fittedSEMMS=fittedVSnew, fittedQREM=qremFit))
     }
     prev_ll <- new_ll
     # apply the weights found by QREM and run SEMMS
     dataYXZtmp <- dataYXZ
     dataYXZtmp$Y <- (dataYXZ$Y - (1-2*qn)/qremFit$weights)
-    fittedVSnew <- fitSEMMS(dataYXZtmp, distribution = 'N', mincor=0.8, rnd=F,
+    fittedVSnew <- fitSEMMS(dataYXZtmp, distribution = 'N', mincor=mincor, rnd=F,
                             nnset=nnset, minchange = 1, maxst = 20,
-                            initWithEdgeFinder = ifelse(repno == 1, TRUE, FALSE))
-    if(repno == 1) {
-      A <- fittedVSnew$gam.out$A
-      initlockedout <- fittedVSnew$gam.out$lockedOut
-      Zcols0 <- which(initlockedout == 0)
-      nns <- rep(0, dataYXZ$K)
-      nns[fittedVSnew$gam.out$nn] <- 1
-      fittedVSnew$gam.out$nn <- which(nns[Zcols0] == 1)
-      dat0 <- dataYXZ
-      dataYXZ$Z <- dat0$Z[,Zcols0]
-      dataYXZ$K <- length(Zcols0)
-      dataYXZ$originalZnames <- dat0$originalZnames[Zcols0]
-      dataYXZ$colnamesZ <- dat0$colnamesZ[Zcols0]
+                            initWithEdgeFinder=FALSE)
+    if(initWithEdgeFinder) {
+      if (length(fittedVSnew$gam.out$nn) > 0)
+        fittedVSnew$gam.out$nn <- Zcols[fittedVSnew$gam.out$nn]
+      fittedVSnew$gam.out$lockedOut <- rep(0, dat0$K)
+      A <- effit$AdjMat
+      A[1, fittedVSnew$gam.out$nn+1] <- A[fittedVSnew$gam.out$nn+1, 1] <- 1
+      lout <- setdiff(which((A + A%*%A)[1,] > 0), 1)
+      fittedVSnew$gam.out$lockedOut[setdiff(lout-1, fittedVSnew$gam.out$nn)] <- 1
+      fittedVSnew$inits$discard <- rep(-1, dat0$K)
+      fittedVSnew$gam.out$A <- effit$AdjMat
     }
     if (length(fittedVSnew$gam.out$nn) == 0)
       return(list(fittedSEMMS=fittedVSnew, fittedQREM=NULL))
     nnset <- fittedVSnew$gam.out$nn
   }
-  if (length(fittedVSnew$gam.out$nn) > 0)
-    fittedVSnew$gam.out$nn <- Zcols0[fittedVSnew$gam.out$nn]
-  fittedVSnew$gam.out$A <- A
-  fittedVSnew$gam.out$lockedOut <- initlockedout
   return(list(fittedSEMMS=fittedVSnew, fittedQREM=qremFit))
 }
