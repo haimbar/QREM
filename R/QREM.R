@@ -1,4 +1,4 @@
-#' Fitting a quantile regression model via the EM algorithm
+#' Fitting a quantile regression model via the EM algorithm.
 #'
 #' @param func The fitting function (lm, lmer, or gam).
 #' @param linmod A formula (the linear model for fitting in the M step).
@@ -81,7 +81,7 @@ QREM <- function (func, linmod, dframe, qn, userwgts = NULL,..., err = 10,
 #' @param userwgts The user-provided sampling weights (optional. Default=NULL.)
 #' @param ... Any arguments to be passed to func (except for the formula and weights)
 #' @param sampleFrom A subset of rows in dframe0 to sample from (for mixed models). Default=NULL.
-#' @param B The number of bootstrap iterations (default=100)
+#' @param B The number of bootstrap iterations (default=100).
 #' @param err The initial value for the estimation error (default=10).
 #' @param maxit The maximum number of EM iterations (default=1000).
 #' @param tol The error tolerance level (default=0.001).
@@ -207,7 +207,7 @@ bcov <- function (qremFit, linmod, dframe, qn, userwgts=NULL) {
 #' @param varname The predictor's name (for plotting).
 #' @param u_i The QR residuals.
 #' @param qn The quantile used in the regression.
-#' @param plot.it Boolean, if TRUE, will show the histogram of the residuals and the fitted kernel density estimate(default=TRUE).
+#' @param plot.it Boolean, if TRUE, will show the histogram of the residuals and the fitted kernel density estimate (default=TRUE).
 #' @param filename The pdf file to save the plot. Default is NULL (print to the screen.)
 #' @return A list, as follows, plus the marginal deviance:
 #' \itemize{
@@ -278,64 +278,124 @@ QRdiagnostics <- function(X, varname, u_i, qn,  plot.it=TRUE, filename=NULL) {
 #'
 #' Showing multiple ('flat') QQ plots for different quantiles using a heatmap.
 #'
-#' @param x The variable used in the QQ-plot.
-#' @param evalx The values of the variable x where the quantiles are calculated.
-#' @param M A matrix obtained from QRdiagnostics, applied to multiple quantiles.
-#' @param qns The quantiles for which we compute the QQ plot.
-#' @param L The number of color levels to be used in the heatmap (default=21).
-#' @param minRatio The smallest ratio between expected and observed quantile (default=0).
-#' @param maxRatio The largest ratio between expected and observed quantile (default=2).
+#' @param dat The data matrix.
+#' @param cnum The selected column number.
+#' @param vname The selected variable name (if cnum is not specified).
+#' @param qrfits A list of QR-fitted models.
+#' @param qns The quantiles.
+#' @param maxm The maximum number of segments in the partision of the selected variable (default=30)
+#' @param sdevs Used to determine the ranges for critical values under the null model and thus the range of colors in the heatmap (default= 4).
 #' @param filename The pdf file to save the plot. Default is NULL (print to the screen.)
+#' @param plot.it A logical variable used to determine whether to show the diagnostic plot (TRUE).
 #' @importFrom grDevices topo.colors pdf dev.off
+#' @importFrom stats prop.test qnorm
 #' @export
 #' @examples
 #' \donttest{
 #' data(simdf)
-#' L <- 20
 #' qns <- seq(0.1,0.9,by=0.1)
-#' xqs <- quantile(simdf$x, probs = (1:(L-1))/L)
-#' names(xqs) <- c()
-#' qqp  <- matrix(0, nrow=length(xqs), ncol=length(qns))
-#' i <- 1
-#' for (qn in qns){
-#'     qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=qn)
-#'     qrdg <- QRdiagnostics(simdf$x, "x",qremFit$ui, qn,  plot.it = FALSE)
-#'     for (j in 1:(L-1)) {
-#'         qqp[j,i] <- length(which(qrdg$y < xqs[j])) / length(which(qrdg$x < xqs[j]))
-#'     }
-#'     i <- i+1
+#' qrfits <- list()
+#' for (i in 1:length(qns)) {
+#'  qrfits[[i]] <- QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=qns[i])
 #' }
-#' flatQQplot(simdf$x,xqs,qqp,qns)
+#' pvals <- flatQQplot(dat=simdf, cnum = 2, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
+#' pvals <- flatQQplot(dat=simdf, cnum = 3, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
+#' pvals <- flatQQplot(dat=simdf, cnum = 4, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
 #' }
-flatQQplot <- function(x, evalx, M, qns, L=21, minRatio=0,maxRatio=2, filename=NULL) {
-  ycoord <- c(min(x), evalx, max(x))
+flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
+                          maxm=30, sdevs = 4, filename = NULL, plot.it=TRUE) {
+  if (is.null(cnum) & is.null(vname)) {
+    warning("Must specify either a valid column number or a column name.")
+    return(FALSE)
+  }
+  if (!is.null(vname)) {
+    cnum <- which(colnames(dat) == vname)
+  }
+  x <- dat[,cnum]
+
+  N <- nrow(dat)
+  k <- length(qns)
+  if (class(dat[,cnum]) == "factor") {
+    x <- droplevels(x)
+    m <- length(levels(x))
+    endpts <- 1:length(levels(x))+0.5
+    xcoord <- 1:length(levels(x))
+    xcoord <- c(xcoord, max(xcoord)+1)
+  }
+  if (class(dat[,cnum]) %in%  c("integer","numeric")) {
+    m <- min(floor(N/(10*k)), maxm)
+    if (m == 1) {
+      warnings("Sample size is not large enough to perform this function for ", k, "quantiles")
+      return(FALSE)
+    }
+    endpts <- c(quantile(x, probs = (1:(m-1))/m), max(x))
+    names(endpts) <- c()
+    xcoord <- unique(c(min(x), endpts))
+    m <- length(xcoord) - 1
+  }
+  obscnt <- sqcols <- matrix(0, ncol=m, nrow=k)
+  pvals <- list()
+  cutoffs <- qnorm(c(0, kronecker(10^seq(-sdevs, -1), c(0.25, 0.5, 1))))
+  cutoffs <- c(cutoffs, rev(-cutoffs))
+  L <- length(cutoffs)
   cols <- topo.colors(L)
-  mdist <- 0.5*min(abs(diff(qns)))
-  if (! is.null(filename))
-    pdf(filename, width=5, height=5)
-  plot(c(min(qns)-mdist,max(qns)+4*mdist),c(min(x)-0.2*(max(x)-min(x)),max(x)), col=0, axes=F,
-       main = "Qy/Qx", xlab="", ylab="x")
-  axis(2,at = evalx)
-  text(qns, min(x)-0.1*(max(x)-min(x)), qns,cex=0.7)
-  text(min(qns)-mdist, min(x)-0.05*(max(x)-min(x)), "q=",cex=0.7)
-  qRatioRng <- seq(minRatio,maxRatio,length=L)
-  for (i in 1:ncol(M)) {
-    lvls <- cut(pmin(M[,i],2), breaks=qRatioRng, include.lowest=TRUE)
-    for (j in 1:nrow(M)) {
-      rect(qns[i]-mdist/2,ycoord[j],qns[i]+mdist/2,ycoord[j+1],
-           col = cols[as.numeric(lvls[j])], border="white")
+  for (i in 1:k) {
+    qremFit <-  qrfits[[i]]
+    belowQR <- (qremFit$ui < 0)
+    if (class(dat[,cnum]) %in% c("integer","numeric")) {
+      Gij <- cut(x, breaks = xcoord, include.lowest = TRUE)
+      gijtab <- table(belowQR, Gij)
+      if (nrow(gijtab) == 1) {
+        if(rownames(gijtab) == "FALSE") {
+          obscnt[i,] <- rep(0, ncol(gijtab))
+        } else {
+          obscnt[i,] <- gijtab[1,]
+        }
+      } else {
+        obscnt[i,] <- gijtab[2,]
+      }
+    }
+    if (class(dat[,cnum]) == "factor") {
+      Gij <- x
+      obscnt[i,] <- table(belowQR, dat[,cnum])[2,]
+    }
+    pvals[[i]] <- prop.test(obscnt[i,], pmax(table(Gij), 0.1), rep(qns[i], m))
+    sqcols[i,] <- as.numeric(cut((obscnt[i,]/table(Gij)-qns[i])/sqrt(qns[i]*(1-qns[i])/table(Gij)),breaks = cutoffs))
+  }
+  mdist <- 0.5*max(abs(diff(xcoord)))
+  qdist <- ifelse(length(qns) > 1, 0.5*max(abs(diff(qns))),1)
+  if (!is.null(filename))
+    pdf(filename, width = 5, height = 5)
+  if (plot.it) {
+    plot( c(min(xcoord) - 0.5 * mdist, max(xcoord) + 5 * mdist),
+          c(0 - qdist, 1),  col = 0, axes = F,
+          main = colnames(dat)[cnum], ylab = "quantile", xlab = "x")
+    if (class(dat[,cnum]) %in% c("integer","numeric"))
+      axis(1, at = sprintf("%3.1f",xcoord))
+    if (class(dat[,cnum]) == "factor")
+      text(xcoord[1:m]+mdist,rep(0,m), levels(x))
+    text(min(xcoord),qns,  qns, cex = 0.7, pos=2)
+    #  Chi <- (obscnt-expcnt)/sqrt(expcnt)
+    for (j in 1:ncol(obscnt)) {
+      for (i in 1:nrow(obscnt)) {
+        rect( xcoord[j], qns[i] - 0.95*qdist,
+              xcoord[j + 1], qns[i] + 0.95*qdist,
+              col = cols[sqcols[i,j]],border = "white")
+      }
+    }
+    # legend:
+    #rngx <- max(qns) - min(qns)
+    rngx <- 1
+    for (j in 1:L) {
+      rect(max(xcoord) + 0.25 * mdist, (j - 1)*rngx/L,
+           max(xcoord) + mdist, j*rngx/L, col = cols[j], border = "white")
+      text(max(xcoord) + 2*mdist, (j-0.5)*rngx/L,
+           format(cutoffs[j], digits=3), cex=0.6, col="grey33", font = 2)
     }
   }
-  rngx <- max(x) - min(x)
-  for (j in 1:L) {
-    rect(max(qns)+3.5*mdist-mdist,min(x) + (j-1)*rngx/L,
-         max(qns)+3.5*mdist+mdist,min(x) + (j)*rngx/L,
-         col = cols[j], border="white")
-    text(max(qns)+3.5*mdist, min(x)+(j-0.5)*rngx/L, format(qRatioRng[j], digits=3),
-         cex = 0.7, col="grey", font = 2)
-  }
-  if (! is.null(filename))
+  if (!is.null(filename))
     dev.off()
+  return(pvals)
 }
 
 
@@ -355,6 +415,8 @@ flatQQplot <- function(x, evalx, M, qns, L=21, minRatio=0,maxRatio=2, filename=N
 #' @param initWithEdgeFinder Determines whether to use the edgefinder package to find highly correlated pairs of predictors (default=FALSE).
 #' @param mincor To be passed to the fitSEMMS function (the minimum correlation coefficient between pairs of putative variable, over which they are considered highly correlated). Default is 0.75.
 #' @importFrom SEMMS fitSEMMS readInputFile
+#' @importFrom edgefinder edgefinder graphComponents
+#' @importFrom Matrix Diagonal
 #' @export
 #' @examples
 #' \donttest{

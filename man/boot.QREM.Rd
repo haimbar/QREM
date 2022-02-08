@@ -39,7 +39,7 @@ boot.QREM(
 
 \item{sampleFrom}{A subset of rows in dframe0 to sample from (for mixed models). Default=NULL.}
 
-\item{B}{The number of bootstrap iterations (default=100)}
+\item{B}{The number of bootstrap iterations (default=100).}
 
 \item{err}{The initial value for the estimation error (default=10).}
 

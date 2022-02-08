@@ -2,7 +2,7 @@
 % Please edit documentation in R/QREM.R
 \name{QREM}
 \alias{QREM}
-\title{Fitting a quantile regression model via the EM algorithm}
+\title{Fitting a quantile regression model via the EM algorithm.}
 \usage{
 QREM(
   func,
@@ -51,7 +51,7 @@ A list containing the following
 }
 }
 \description{
-Fitting a quantile regression model via the EM algorithm
+Fitting a quantile regression model via the EM algorithm.
 }
 \examples{
 data(simdf)

@@ -5,32 +5,35 @@
 \title{A `flat QQ-plot' for a fitted quantile regression model.}
 \usage{
 flatQQplot(
-  x,
-  evalx,
-  M,
+  dat,
+  cnum = NULL,
+  vname = NULL,
+  qrfits,
   qns,
-  L = 21,
-  minRatio = 0,
-  maxRatio = 2,
-  filename = NULL
+  maxm = 30,
+  sdevs = 4,
+  filename = NULL,
+  plot.it = TRUE
 )
 }
 \arguments{
-\item{x}{The variable used in the QQ-plot.}
+\item{dat}{The data matrix.}
 
-\item{evalx}{The values of the variable x where the quantiles are calculated.}
+\item{cnum}{The selected column number.}
 
-\item{M}{A matrix obtained from QRdiagnostics, applied to multiple quantiles.}
+\item{vname}{The selected variable name (if cnum is not specified).}
 
-\item{qns}{The quantiles for which we compute the QQ plot.}
+\item{qrfits}{A list of QR-fitted models.}
 
-\item{L}{The number of color levels to be used in the heatmap (default=21).}
+\item{qns}{The quantiles.}
 
-\item{minRatio}{The smallest ratio between expected and observed quantile (default=0).}
+\item{maxm}{The maximum number of segments in the partision of the selected variable (default=30)}
 
-\item{maxRatio}{The largest ratio between expected and observed quantile (default=2).}
+\item{sdevs}{Used to determine the ranges for critical values under the null model and thus the range of colors in the heatmap (default= 4).}
 
 \item{filename}{The pdf file to save the plot. Default is NULL (print to the screen.)}
+
+\item{plot.it}{A logical variable used to determine whether to show the diagnostic plot (TRUE).}
 }
 \description{
 Showing multiple ('flat') QQ plots for different quantiles using a heatmap.
@@ -38,20 +41,13 @@ Showing multiple ('flat') QQ plots for different quantiles using a heatmap.
 \examples{
 \donttest{
 data(simdf)
-L <- 20
 qns <- seq(0.1,0.9,by=0.1)
-xqs <- quantile(simdf$x, probs = (1:(L-1))/L)
-names(xqs) <- c()
-qqp  <- matrix(0, nrow=length(xqs), ncol=length(qns))
-i <- 1
-for (qn in qns){
-    qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=qn)
-    qrdg <- QRdiagnostics(simdf$x, "x",qremFit$ui, qn,  plot.it = FALSE)
-    for (j in 1:(L-1)) {
-        qqp[j,i] <- length(which(qrdg$y < xqs[j])) / length(which(qrdg$x < xqs[j]))
-    }
-    i <- i+1
+qrfits <- list()
+for (i in 1:length(qns)) {
+ qrfits[[i]] <- QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=qns[i])
 }
-flatQQplot(simdf$x,xqs,qqp,qns)
+pvals <- flatQQplot(dat=simdf, cnum = 2, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
+pvals <- flatQQplot(dat=simdf, cnum = 3, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
+pvals <- flatQQplot(dat=simdf, cnum = 4, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
 }
 }

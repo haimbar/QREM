@@ -15,7 +15,7 @@ QRdiagnostics(X, varname, u_i, qn, plot.it = TRUE, filename = NULL)
 
 \item{qn}{The quantile used in the regression.}
 
-\item{plot.it}{Boolean, if TRUE, will show the histogram of the residuals and the fitted kernel density estimate(default=TRUE).}
+\item{plot.it}{Boolean, if TRUE, will show the histogram of the residuals and the fitted kernel density estimate (default=TRUE).}
 
 \item{filename}{The pdf file to save the plot. Default is NULL (print to the screen.)}
 }
