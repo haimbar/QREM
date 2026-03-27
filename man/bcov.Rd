@@ -7,7 +7,7 @@
 bcov(qremFit, linmod, dframe, qn, userwgts = NULL)
 }
 \arguments{
-\item{qremFit}{A fitted model object, returned by QREM.}
+\item{qremFit}{A fitted model object returned by \code{\link{QREM}}.}
 
 \item{linmod}{A formula (the linear model for fitting in the M step).}
 
@@ -15,18 +15,30 @@ bcov(qremFit, linmod, dframe, qn, userwgts = NULL)
 
 \item{qn}{The selected quantile. Must be in (0,1).}
 
-\item{userwgts}{The user-provided sampling weights (optional. Default=NULL.)}
+\item{userwgts}{A column name or index in \code{dframe} for user-provided
+sampling weights (optional. Default=NULL). Sampling weights are applied in
+the fixed-effects case only; ignored for \code{lmerMod} fits.}
 }
 \value{
-A covariance matrix for the fixed-effects model.
+A covariance matrix for the fixed-effects coefficients. For mixed
+  models, only the fixed-effects sub-matrix (rows/columns corresponding to
+  \code{X}) is returned, not the full augmented matrix including random effects.
 }
 \description{
-Covariance matrix estimation for the fixed effects case using Bahadur's
-representation. In mixed model, we use the BLUPs (as if they were estimated
-as fixed effects) and the same formula is used.
+Estimates the covariance matrix of the fixed-effects coefficients using
+Bahadur's representation:
+\deqn{Cov(\hat{\beta}) = \frac{\tau(1-\tau)}{f(0)^2} (X'X)^{-1}}
+where \eqn{f(0)} is the density of the residuals at zero, estimated via a
+kernel density estimator using Silverman's bandwidth
+(\eqn{0.9 \cdot \min(s, IQR/1.34) \cdot n^{-0.2}}).
+In the mixed model case, the random effects are treated as fixed (BLUPs),
+and the same formula is applied; only the fixed-effects sub-matrix is returned.
 }
 \examples{
 data(simdf)
 qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
 covmat <- bcov(qremFit,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
+}
+\seealso{
+\code{\link{QREM}}, \code{\link{boot.QREM}}
 }

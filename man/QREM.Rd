@@ -18,44 +18,78 @@ QREM(
 )
 }
 \arguments{
-\item{func}{The fitting function (lm, lmer, or gam).}
+\item{func}{The fitting function to use in the M-step. Typically \code{lm},
+\code{\link[lme4]{lmer}}, or \code{\link[gam]{gam}}. Any function that
+accepts \code{formula}, \code{data}, and \code{weights} arguments and
+returns an object with a \code{\link{logLik}} method is supported.}
 
-\item{linmod}{A formula (the linear model for fitting in the M step).}
+\item{linmod}{A formula specifying the linear model for the M-step.}
 
-\item{dframe}{A data frame containing the columns in the formula.}
+\item{dframe}{A data frame containing all variables referenced in
+\code{linmod}.}
 
-\item{qn}{The selected quantile. Must be in (0,1).}
+\item{qn}{The target quantile. Must be in (0, 1).}
 
-\item{userwgts}{The user-provided sampling weights (optional. Default=NULL.)}
+\item{userwgts}{A column name or index in \code{dframe} for user-provided
+sampling weights (optional. Default=NULL). When supplied, EM weights are
+multiplied by these sampling weights at each iteration.}
 
-\item{...}{Any arguments to be passed to func (except for the formula and weights). Note that gam requires the family of the error distribution.}
+\item{...}{Additional arguments passed to \code{func} (except
+\code{formula}, \code{data}, and \code{weights}, which are set
+internally). For \code{gam}, the \code{family} argument must be supplied
+here.}
 
-\item{err}{The initial value for the estimation error (default=10). Must be greater than tol (below).}
+\item{err}{Initial log-likelihood difference used to enter the EM loop
+(default=10). Should be set larger than \code{tol} to ensure at least one
+iteration runs.}
 
-\item{maxit}{The maximum number of EM iterations (default=1000).}
+\item{maxit}{Maximum number of EM iterations (default=1000).}
 
-\item{tol}{The error tolerance level (default=0.001).}
+\item{tol}{Convergence threshold on the absolute change in log-likelihood
+between iterations (default=0.001).}
 
-\item{maxInvLambda}{The maximum value of the weight for WLS fitting (default=300).}
+\item{maxInvLambda}{Upper bound on the E-step weights \eqn{1/|u_i|}
+(default=300). Prevents numerical instability when residuals are close to
+zero. Increase cautiously; very large values can cause ill-conditioned WLS
+fits.}
 }
 \value{
 A list containing the following
 \itemize{
-  \item coef The estimated regression coefficients (a list).
-  \item fitted.mod The output from lm(), lmer(), or gam() in the last EM iteration.
-  \item empq The percentage of points below the regression line (the empirical quantile).
-  \item ui The quantile regression residuals.
-  \item weights The weights used in the WLS solution.
-  \item iter The number of EM iterations.
-  \item err The final EM error (convergence criterion).
+  \item \code{coef} A list of estimated coefficients. For \code{lm} and
+    \code{gam}: \code{list(beta = coef vector)}. For \code{lmerMod}:
+    \code{list(beta = fixed effects, u = random effects)}.
+  \item \code{fitted.mod} The model object returned by \code{func} in the
+    final EM iteration. Can be passed to \code{summary()}, \code{aov()},
+    etc.
+  \item \code{empq} The proportion of observations below the fitted
+    regression line. Should be close to \code{qn} at convergence.
+  \item \code{ui} The quantile regression residuals
+    (\eqn{y_i - \hat{y}_i}) from the final iteration.
+  \item \code{weights} The final E-step weights (\eqn{1/|u_i|}, capped at
+    \code{maxInvLambda}). Passed to \code{\link{bcov}} for covariance
+    estimation.
+  \item \code{iter} The number of EM iterations performed.
+  \item \code{err} The final log-likelihood change (convergence criterion).
+    Values above \code{tol} indicate the algorithm did not converge within
+    \code{maxit} iterations.
 }
 }
 \description{
-Fitting a quantile regression model via the EM algorithm.
+Fits a quantile regression model by treating it as a maximum likelihood
+problem under the Asymmetric Laplace Distribution (ALD). The EM algorithm
+iterates between an E-step, which computes observation weights as
+\eqn{1/|u_i|} (inversely proportional to the absolute residuals), and an
+M-step, which fits a weighted least squares model on a shifted response.
+Convergence is assessed by the change in log-likelihood between iterations.
 }
 \examples{
 data(simdf)
-qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
+qremFit <-  QREM(lm, linmod=y~x*x2 +x3, dframe=simdf, qn=0.2)
 summary(aov(qremFit$fitted.mod))
 summary(qremFit$fitted.mod)$coef
+}
+\seealso{
+\code{\link{bcov}}, \code{\link{boot.QREM}},
+  \code{\link{QRdiagnostics}}
 }

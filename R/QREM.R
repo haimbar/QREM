@@ -1,35 +1,71 @@
 #' Fitting a quantile regression model via the EM algorithm.
 #'
-#' @param func The fitting function (lm, lmer, or gam).
-#' @param linmod A formula (the linear model for fitting in the M step).
-#' @param dframe A data frame containing the columns in the formula.
-#' @param qn The selected quantile. Must be in (0,1).
-#' @param userwgts The user-provided sampling weights (optional. Default=NULL.)
-#' @param ... Any arguments to be passed to func (except for the formula and weights). Note that gam requires the family of the error distribution.
-#' @param err The initial value for the estimation error (default=10). Must be greater than tol (below).
-#' @param maxit The maximum number of EM iterations (default=1000).
-#' @param tol The error tolerance level (default=0.001).
-#' @param maxInvLambda The maximum value of the weight for WLS fitting (default=300).
+#' Fits a quantile regression model by treating it as a maximum likelihood
+#' problem under the Asymmetric Laplace Distribution (ALD). The EM algorithm
+#' iterates between an E-step, which computes observation weights as
+#' \eqn{1/|u_i|} (inversely proportional to the absolute residuals), and an
+#' M-step, which fits a weighted least squares model on a shifted response.
+#' Convergence is assessed by the change in log-likelihood between iterations.
+#' @param func The fitting function to use in the M-step. Typically \code{lm},
+#'   \code{\link[lme4]{lmer}}, or \code{\link[gam]{gam}}. Any function that
+#'   accepts \code{formula}, \code{data}, and \code{weights} arguments and
+#'   returns an object with a \code{\link{logLik}} method is supported.
+#' @param linmod A formula specifying the linear model for the M-step.
+#' @param dframe A data frame containing all variables referenced in
+#'   \code{linmod}.
+#' @param qn The target quantile. Must be in (0, 1).
+#' @param userwgts A column name or index in \code{dframe} for user-provided
+#'   sampling weights (optional. Default=NULL). When supplied, EM weights are
+#'   multiplied by these sampling weights at each iteration.
+#' @param ... Additional arguments passed to \code{func} (except
+#'   \code{formula}, \code{data}, and \code{weights}, which are set
+#'   internally). For \code{gam}, the \code{family} argument must be supplied
+#'   here.
+#' @param err Initial log-likelihood difference used to enter the EM loop
+#'   (default=10). Should be set larger than \code{tol} to ensure at least one
+#'   iteration runs.
+#' @param maxit Maximum number of EM iterations (default=1000).
+#' @param tol Convergence threshold on the absolute change in log-likelihood
+#'   between iterations (default=0.001).
+#' @param maxInvLambda Upper bound on the E-step weights \eqn{1/|u_i|}
+#'   (default=300). Prevents numerical instability when residuals are close to
+#'   zero. Increase cautiously; very large values can cause ill-conditioned WLS
+#'   fits.
 #' @return A list containing the following
 #' \itemize{
-#'   \item coef The estimated regression coefficients (a list).
-#'   \item fitted.mod The output from lm(), lmer(), or gam() in the last EM iteration.
-#'   \item empq The percentage of points below the regression line (the empirical quantile).
-#'   \item ui The quantile regression residuals.
-#'   \item weights The weights used in the WLS solution.
-#'   \item iter The number of EM iterations.
-#'   \item err The final EM error (convergence criterion).
+#'   \item \code{coef} A list of estimated coefficients. For \code{lm} and
+#'     \code{gam}: \code{list(beta = coef vector)}. For \code{lmerMod}:
+#'     \code{list(beta = fixed effects, u = random effects)}.
+#'   \item \code{fitted.mod} The model object returned by \code{func} in the
+#'     final EM iteration. Can be passed to \code{summary()}, \code{aov()},
+#'     etc.
+#'   \item \code{empq} The proportion of observations below the fitted
+#'     regression line. Should be close to \code{qn} at convergence.
+#'   \item \code{ui} The quantile regression residuals
+#'     (\eqn{y_i - \hat{y}_i}) from the final iteration.
+#'   \item \code{weights} The final E-step weights (\eqn{1/|u_i|}, capped at
+#'     \code{maxInvLambda}). Passed to \code{\link{bcov}} for covariance
+#'     estimation.
+#'   \item \code{iter} The number of EM iterations performed.
+#'   \item \code{err} The final log-likelihood change (convergence criterion).
+#'     Values above \code{tol} indicate the algorithm did not converge within
+#'     \code{maxit} iterations.
 #' }
+#' @seealso \code{\link{bcov}}, \code{\link{boot.QREM}},
+#'   \code{\link{QRdiagnostics}}
 #' @importFrom lme4 lmer fixef ranef
 #' @export
 #' @examples
 #' data(simdf)
-#' qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
+#' qremFit <-  QREM(lm, linmod=y~x*x2 +x3, dframe=simdf, qn=0.2)
 #' summary(aov(qremFit$fitted.mod))
 #' summary(qremFit$fitted.mod)$coef
 QREM <- function (func, linmod, dframe, qn, userwgts = NULL,..., err = 10,
                   maxit = 1000, tol = 0.001, maxInvLambda = 300) {
   ycolnum <- which(colnames(dframe) == as.character(formula(linmod)[2]))
+  if (length(ycolnum) == 0)
+    stop("QREM: response variable '", as.character(formula(linmod)[2]),
+         "' not found in dframe.")
   y0 <- dframe[, ycolnum]
   #y0 <- model.extract(model.frame(linmod, dframe), "response")
   uwgts <- rep(1, length(y0))
@@ -42,13 +78,19 @@ QREM <- function (func, linmod, dframe, qn, userwgts = NULL,..., err = 10,
   loglikNew <- as.numeric(logLik(modelFit))
   loglikOld <- loglikNew + 2 * err
   invLambda <- pmin(1/abs(residuals(modelFit)), maxInvLambda)
+  ui <- as.vector(residuals(modelFit))
+  if (inherits(modelFit, "lmerMod")) {
+    modelCoefs <- list(beta = fixef(modelFit), u = ranef(modelFit))
+  } else {
+    modelCoefs <- list(beta = modelFit$coefficients)
+  }
   it <- 0
   while ((err > tol) & ((it = it + 1) < maxit)) {
     args$weights <- invLambda*uwgts
     dframe[, ycolnum] <- y0 - (1 - 2 * qn)/invLambda
     args$data <- dframe
     modelFit <- do.call(func, args )
-    if (class(modelFit) == "lmerMod") {
+    if (inherits(modelFit, "lmerMod")) {
       modelFittedValues <- fitted(modelFit)
       modelCoefs <- list(beta = fixef(modelFit), u = ranef(modelFit))
     } else {
@@ -118,7 +160,7 @@ boot.QREM <- function(func, linmod, dframe0, qn, n, userwgts=NULL,...,
                    maxit = maxit, tol = tol, maxInvLambda = maxInvLambda)
   if (B == 1) { return(qremFit0$coef$beta) }
   oneIt <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
-  useCores <- detectCores() - 1
+  useCores <- max(detectCores() - 1, 1, na.rm = TRUE)
   if (showEst) {
     cat("One iteration ", ceiling(oneIt), "seconds\n")
     cat("Estimated completion time, using", useCores, " cores >",
@@ -130,7 +172,7 @@ boot.QREM <- function(func, linmod, dframe0, qn, n, userwgts=NULL,...,
   addArgs <- paste(list(...))
   clusterExport(cl, varlist = c("func", "linmod", "dframe0", "userwgts","qn",
                                 "n","QREM", "lm", "lmer", "gam", "colNum",
-                                "addArgs",
+                                "addArgs", "sampleFrom",
                                 "fixef","ranef", "seedno", "err", "maxit",
                                 "tol","maxInvLambda"), envir = environment())
   QREMpar = parLapply(cl, 1:(B - 1), function(repnum) {
@@ -147,6 +189,7 @@ boot.QREM <- function(func, linmod, dframe0, qn, n, userwgts=NULL,...,
   if (showEst)
     cat("Actual completion time =",
         ceiling(as.numeric(difftime(Sys.time(),t0, units = "secs"))), " seconds\n")
+  QREMpar <- Filter(function(x) length(x) == n_coefs, QREMpar)
   rbind(qremFit0$coef$beta, matrix(unlist(QREMpar), ncol = n_coefs,
                                    byrow = TRUE))
 }
@@ -154,15 +197,25 @@ boot.QREM <- function(func, linmod, dframe0, qn, n, userwgts=NULL,...,
 
 #' Covariance matrix estimation
 #'
-#' Covariance matrix estimation for the fixed effects case using Bahadur's
-#' representation. In mixed model, we use the BLUPs (as if they were estimated
-#' as fixed effects) and the same formula is used.
-#' @param qremFit A fitted model object, returned by QREM.
+#' Estimates the covariance matrix of the fixed-effects coefficients using
+#' Bahadur's representation:
+#' \deqn{Cov(\hat{\beta}) = \frac{\tau(1-\tau)}{f(0)^2} (X'X)^{-1}}
+#' where \eqn{f(0)} is the density of the residuals at zero, estimated via a
+#' kernel density estimator using Silverman's bandwidth
+#' (\eqn{0.9 \cdot \min(s, IQR/1.34) \cdot n^{-0.2}}).
+#' In the mixed model case, the random effects are treated as fixed (BLUPs),
+#' and the same formula is applied; only the fixed-effects sub-matrix is returned.
+#' @param qremFit A fitted model object returned by \code{\link{QREM}}.
 #' @param linmod A formula (the linear model for fitting in the M step).
 #' @param dframe A data frame containing the columns in the formula.
 #' @param qn The selected quantile. Must be in (0,1).
-#' @param userwgts The user-provided sampling weights (optional. Default=NULL.)
-#' @return A covariance matrix for the fixed-effects model.
+#' @param userwgts A column name or index in \code{dframe} for user-provided
+#'   sampling weights (optional. Default=NULL). Sampling weights are applied in
+#'   the fixed-effects case only; ignored for \code{lmerMod} fits.
+#' @return A covariance matrix for the fixed-effects coefficients. For mixed
+#'   models, only the fixed-effects sub-matrix (rows/columns corresponding to
+#'   \code{X}) is returned, not the full augmented matrix including random effects.
+#' @seealso \code{\link{QREM}}, \code{\link{boot.QREM}}
 #' @importFrom KernSmooth bkde
 #' @importFrom stats IQR fitted formula logLik model.extract model.frame model.matrix qqplot quantile residuals sd as.formula lm
 #' @importFrom lme4 getME
@@ -180,14 +233,22 @@ bcov <- function (qremFit, linmod, dframe, qn, userwgts=NULL) {
   # estimate f(0) with a kernel density estimator
   bw <- (length(ui))^(-0.2) * 0.9 * min(sd(ui), IQR(ui)/1.34)
   kdest <- bkde(ui, bandwidth = bw)
-  largestNeg <- which.max(kdest$x[kdest$x < 0])
+  negIdx <- which(kdest$x < 0)
+  if (length(negIdx) == 0 || negIdx[length(negIdx)] >= length(kdest$x)) {
+    warning("bcov: residuals have no mass near zero; f(0) estimate is unreliable.")
+    return(NULL)
+  }
+  largestNeg <- negIdx[length(negIdx)]  # index in full kdest$x of the last negative x
   xs <- c(kdest$x[largestNeg + 1], -kdest$x[largestNeg])
   ys <- c(kdest$y[largestNeg], kdest$y[largestNeg + 1])
   dFp0 <- sum(xs * ys)/sum(xs)
-  if (class(qremFit$fitted.mod) == "lmerMod") {
+  if (dFp0 < .Machine$double.eps) {
+    warning("bcov: estimated density at zero is near zero; covariance estimates will be unreliable.")
+  }
+  if (inherits(qremFit$fitted.mod, "lmerMod")) {
     XX <- getME(qremFit$fitted.mod,"X")
     ZZ <- getME(qremFit$fitted.mod,"Z")
-    DM <- cbind(XX, ZZ[,-ncol(ZZ)])
+    DM <- if (ncol(ZZ) > 1) cbind(XX, ZZ[,-ncol(ZZ)]) else XX
   } else {
     DM <- XX <- model.matrix(linmod, dframe)
     if (!is.null(userwgts)) { # in the fixed effect model only
@@ -225,6 +286,10 @@ QRdiagnostics <- function(X, varname, u_i, qn,  plot.it=TRUE, filename=NULL) {
   n <- length(u_i)
   empq <- quantile(u_i,qn)
   u_i <- u_i-empq
+  if (sd(u_i) == 0) {
+    warning("QRdiagnostics: all residuals are identical; cannot estimate density.")
+    return(NULL)
+  }
   kde <- bkde(u_i)
   # calculate the deviance:
   mod.deviance <- -sum(u_i*(qn-(u_i >0)))
@@ -236,9 +301,19 @@ QRdiagnostics <- function(X, varname, u_i, qn,  plot.it=TRUE, filename=NULL) {
   }
   # for a given predictor, create a qq-plot (continuous) or a spinogram (categorical)
   posidx <- which(u_i > 0)
+  if (length(posidx) == 0 || length(posidx) == n) {
+    if (plot.it && !is.null(filename)) dev.off()
+    warning("QRdiagnostics: all residuals are on the same side of zero; qq-plot is not meaningful.")
+    return(NULL)
+  }
   if (plot.it && ! is.null(filename))
     pdf(filename, width=5, height=5)
-  if(class(X) == "numeric") {
+  if (!is.numeric(X) && !is.factor(X)) {
+    if (plot.it && !is.null(filename)) dev.off()
+    warning("QRdiagnostics: X must be numeric or factor; no plot produced.")
+    return(NULL)
+  }
+  if (is.numeric(X)) {
     qqp <- qqplot(X[posidx] , X[-posidx], xlim=c(min(X),max(X)),
                   ylim=c(min(X),max(X)),pch=19,cex=0.4,col="blue",
                   xlab = "Q(above)", ylab="Q(below)",
@@ -252,7 +327,7 @@ QRdiagnostics <- function(X, varname, u_i, qn,  plot.it=TRUE, filename=NULL) {
     qqp$dev <- mod.deviance
     return(qqp)
   }
-  if(class(X) == "factor") {
+  if (is.factor(X)) {
     qqlvl <- as.list(colSums(table(u_i[which(u_i < 0)], X[which(u_i < 0)])) / table(X))
     if(plot.it) {
       plot(c(0.25,length(levels(X)))+0.5,c(0,1.2), col=0, axes=F,
@@ -315,17 +390,17 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
 
   N <- nrow(dat)
   k <- length(qns)
-  if (class(dat[,cnum]) == "factor") {
+  if (is.factor(dat[,cnum])) {
     x <- droplevels(x)
     m <- length(levels(x))
     endpts <- 1:length(levels(x))+0.5
     xcoord <- 1:length(levels(x))
     xcoord <- c(xcoord, max(xcoord)+1)
   }
-  if (class(dat[,cnum]) %in%  c("integer","numeric")) {
+  if (is.numeric(dat[,cnum])) {
     m <- min(floor(N/(10*k)), maxm)
-    if (m == 1) {
-      warnings("Sample size is not large enough to perform this function for ", k, "quantiles")
+    if (m <= 1) {
+      warning("Sample size is not large enough to perform this function for ", k, " quantiles")
       return(FALSE)
     }
     endpts <- c(quantile(x, probs = (1:(m-1))/m), max(x))
@@ -342,7 +417,7 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
   for (i in 1:k) {
     qremFit <-  qrfits[[i]]
     belowQR <- (qremFit$ui < 0)
-    if (class(dat[,cnum]) %in% c("integer","numeric")) {
+    if (is.numeric(dat[,cnum])) {
       Gij <- cut(x, breaks = xcoord, include.lowest = TRUE)
       gijtab <- table(belowQR, Gij)
       if (nrow(gijtab) == 1) {
@@ -355,9 +430,18 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
         obscnt[i,] <- gijtab[2,]
       }
     }
-    if (class(dat[,cnum]) == "factor") {
+    if (is.factor(dat[,cnum])) {
       Gij <- x
-      obscnt[i,] <- table(belowQR, dat[,cnum])[2,]
+      gijtab <- table(belowQR, dat[,cnum])
+      if (nrow(gijtab) == 1) {
+        if (rownames(gijtab) == "FALSE") {
+          obscnt[i,] <- rep(0, ncol(gijtab))
+        } else {
+          obscnt[i,] <- gijtab[1,]
+        }
+      } else {
+        obscnt[i,] <- gijtab[2,]
+      }
     }
     pvals[[i]] <- prop.test(obscnt[i,], pmax(table(Gij), 0.1), rep(qns[i], m))
     sqcols[i,] <- as.numeric(cut((obscnt[i,]/table(Gij)-qns[i])/sqrt(qns[i]*(1-qns[i])/table(Gij)),breaks = cutoffs))
@@ -370,9 +454,9 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
     plot( c(min(xcoord) - 0.5 * mdist, max(xcoord) + 5 * mdist),
           c(0 - qdist, 1),  col = 0, axes = F,
           main = colnames(dat)[cnum], ylab = "quantile", xlab = "x")
-    if (class(dat[,cnum]) %in% c("integer","numeric"))
+    if (is.numeric(dat[,cnum]))
       axis(1, at = sprintf("%3.1f",xcoord))
-    if (class(dat[,cnum]) == "factor")
+    if (is.factor(dat[,cnum]))
       text(xcoord[1:m]+mdist,rep(0,m), levels(x))
     text(min(xcoord),qns,  qns, cex = 0.7, pos=2)
     #  Chi <- (obscnt-expcnt)/sqrt(expcnt)
@@ -380,7 +464,8 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
       for (i in 1:nrow(obscnt)) {
         rect( xcoord[j], qns[i] - 0.95*qdist,
               xcoord[j + 1], qns[i] + 0.95*qdist,
-              col = cols[sqcols[i,j]],border = "white")
+              col = if (is.na(sqcols[i,j])) cols[L] else cols[sqcols[i,j]],
+              border = "white")
       }
     }
     # legend:
@@ -430,10 +515,10 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
 #' rownames(ests) <- c("Estimate","s.d")
 #' }
 QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, maxRep=40,initWithEdgeFinder=FALSE, mincor = 0.75) {
-  if(!(class(inputData) %in% c("data.frame","character"))) {
-    stop("Invalid input type:",class(inputData), "\n")
+  if (!is.data.frame(inputData) && !is.character(inputData)) {
+    stop("Invalid input type: ", class(inputData), "\n")
   }
-  if (class(inputData) == "data.frame") {
+  if (is.data.frame(inputData)) {
     filename <- tempfile(pattern = "forsemms_",fileext = ".RData")
     save(inputData, file=filename)
   } else {
@@ -466,18 +551,20 @@ QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, max
     zval <- rep(0, dataYXZ$K)
     rnd <- sample(dataYXZ$K, replace=FALSE)
     m <- 5
-    for (i in 1:(dataYXZ$K/m)) {
-      idx <- ((i-1)*m+1) : (i*m)
+    for (i in 1:ceiling(dataYXZ$K/m)) {
+      idx <- ((i-1)*m+1) : min(i*m, dataYXZ$K)
       preds <- paste0(colnames(dataYXZ$Z)[rnd[idx]], collapse = " + ")
       linmod <- as.formula(paste("Y ~", preds))
       dframetmp <- data.frame(cbind(dataYXZ$Y, dataYXZ$Z[,rnd[idx]]))
       colnames(dframetmp) <- c("Y",colnames(dataYXZ$Z)[rnd[idx]])
       qremFit <- QREM(lm, linmod, dframetmp, qn, maxInvLambda = 1000)
-      zval[rnd[idx]] <- qremFit$coef$beta[-1]/sqrt(diag(bcov(qremFit,linmod,dframetmp,qn)))[-1]
+      se <- sqrt(pmax(diag(bcov(qremFit,linmod,dframetmp,qn)), 0))[-1]
+      zval[rnd[idx]] <- ifelse(se > 0, qremFit$coef$beta[-1]/se, 0)
     }
     nnset <- order(abs(zval),decreasing = TRUE)[1:nn]
   }
   prev_ll <- 0
+  fittedVSnew <- NULL
   for (repno in 1:maxRep) {
     # create a subset of the selected columns and run QREM
     preds <- paste(colnames(dataYXZ$Z)[nnset], collapse = "+")
