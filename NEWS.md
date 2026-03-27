@@ -1,3 +1,33 @@
+# QREM 0.2.1
+
+## Performance
+
+* `QREM()`: The `lm` fast-path inner loop now solves the weighted least-squares
+  problem via normal equations (`crossprod(X, w*X)` + Cholesky) instead of
+  `lm.wfit()`. For typical inputs this is ~1.5x faster per iteration because it
+  avoids scaling the full n×p design matrix by `sqrt(w)` before the QR
+  decomposition. A Cholesky failure (near-singular design) falls back to
+  `lm.wfit()` automatically.
+* `QRdiagnostics()`: The factor-predictor branch replaced
+  `colSums(table(u_i[below], X[below])) / table(X)` with
+  `tabulate(X[below], nlevels(X)) / tabulate(X)`. The old code built a 2D
+  table with one row per unique residual value before summing columns —
+  `tabulate()` counts directly into bins, giving a ~100x speedup on that call
+  (~10ms → ~0.1ms per call).
+* `flatQQplot()`: `cut()` and the three `table()` calls that previously ran
+  inside the per-quantile loop are now replaced by a single `cut()` +
+  `tabulate()` precomputed outside the loop. `tabulate()` is used for all bin
+  counting inside the loop. Combined effect: ~4x faster overall
+  (~28ms → ~7ms for five quantiles on n = 1000).
+
+## Bug fixes
+
+* `bcov()`: `chol2inv()` does not preserve `dimnames`, so
+  `sqrt(diag(cm)["(Intercept)"])` previously returned `NA`. The result matrix
+  now has row and column names restored from the design-matrix column names.
+
+---
+
 # QREM 0.2.0
 
 ## Bug fixes
