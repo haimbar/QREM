@@ -54,6 +54,7 @@
 #' @seealso \code{\link{bcov}}, \code{\link{boot.QREM}},
 #'   \code{\link{QRdiagnostics}}
 #' @importFrom lme4 lmer fixef ranef
+#' @importFrom stats lm.wfit model.matrix
 #' @export
 #' @examples
 #' data(simdf)
@@ -67,14 +68,13 @@ QREM <- function (func, linmod, dframe, qn, userwgts = NULL,..., err = 10,
     stop("QREM: response variable '", as.character(formula(linmod)[2]),
          "' not found in dframe.")
   y0 <- dframe[, ycolnum]
-  #y0 <- model.extract(model.frame(linmod, dframe), "response")
   uwgts <- rep(1, length(y0))
   if (!is.null(userwgts)) { uwgts <- as.numeric(dframe[,userwgts]) }
   args <- list(...)
   args$weights <- uwgts
   args$formula <- linmod
   args$data <- dframe
-  modelFit <- do.call(func, args )
+  modelFit <- do.call(func, args)
   loglikNew <- as.numeric(logLik(modelFit))
   loglikOld <- loglikNew + 2 * err
   invLambda <- pmin(1/abs(residuals(modelFit)), maxInvLambda)
@@ -85,23 +85,58 @@ QREM <- function (func, linmod, dframe, qn, userwgts = NULL,..., err = 10,
     modelCoefs <- list(beta = modelFit$coefficients)
   }
   it <- 0
-  while ((err > tol) & ((it = it + 1) < maxit)) {
-    args$weights <- invLambda*uwgts
-    dframe[, ycolnum] <- y0 - (1 - 2 * qn)/invLambda
-    args$data <- dframe
-    modelFit <- do.call(func, args )
-    if (inherits(modelFit, "lmerMod")) {
-      modelFittedValues <- fitted(modelFit)
-      modelCoefs <- list(beta = fixef(modelFit), u = ranef(modelFit))
-    } else {
-      modelFittedValues <- modelFit$fitted.values
-      modelCoefs <- list(beta = modelFit$coefficients)
+  if (identical(func, lm)) {
+    # Fast path for lm: build the design matrix once before the loop, then
+    # use lm.wfit() for the WLS solve each iteration.  This skips the
+    # formula-parsing, model.frame(), and model.matrix() overhead that a
+    # full lm() call incurs, which dominates runtime for moderate n and p.
+    # logLik is computed inline (replicating stats:::logLik.lm) to avoid
+    # constructing a full lm object every iteration.
+    # One final lm() call after the loop produces the user-facing fitted.mod.
+    # Reuse the model frame already stored in the initial fit (avoids a
+    # redundant model.frame/na.omit pass that model.matrix(linmod,dframe) would trigger).
+    X <- model.matrix(modelFit)
+    N <- nrow(X)
+    log2piN <- log(2 * pi) + 1 - log(N)   # constant across iterations
+    while ((err > tol) & ((it = it + 1) < maxit)) {
+      w          <- invLambda * uwgts
+      y_shifted  <- y0 - (1 - 2 * qn) / invLambda
+      fit        <- lm.wfit(X, y_shifted, w)
+      ui         <- y0 - fit$fitted.values
+      invLambda  <- pmin(1 / abs(ui), maxInvLambda)
+      # logLik.lm: 0.5*(sum(log(w)) - N*(log(2pi) + 1 - log(N) + log(wRSS)))
+      loglikNew  <- 0.5 * (sum(log(w)) - N * (log2piN + log(sum(w * fit$residuals^2))))
+      err        <- abs(loglikNew - loglikOld)
+      loglikOld  <- loglikNew
     }
-    ui <- as.vector(y0 - modelFittedValues)
-    invLambda <- pmin(1/abs(ui), maxInvLambda)
-    loglikNew <- as.numeric(logLik(modelFit))
-    err <- abs(loglikNew - loglikOld)
-    loglikOld <- loglikNew
+    # Final lm() call: produces the proper model object for the user
+    # (needed for summary(), aov(), etc.) using the converged weights.
+    dframe[, ycolnum] <- y0 - (1 - 2 * qn) / invLambda
+    args$weights <- invLambda * uwgts
+    args$data    <- dframe
+    modelFit     <- do.call(func, args)
+    modelCoefs   <- list(beta = modelFit$coefficients)
+    ui           <- as.vector(y0 - modelFit$fitted.values)
+  } else {
+    # General path for lmer, gam, or any other func.
+    while ((err > tol) & ((it = it + 1) < maxit)) {
+      args$weights <- invLambda * uwgts
+      dframe[, ycolnum] <- y0 - (1 - 2 * qn) / invLambda
+      args$data <- dframe
+      modelFit <- do.call(func, args)
+      if (inherits(modelFit, "lmerMod")) {
+        modelFittedValues <- fitted(modelFit)
+        modelCoefs <- list(beta = fixef(modelFit), u = ranef(modelFit))
+      } else {
+        modelFittedValues <- modelFit$fitted.values
+        modelCoefs <- list(beta = modelFit$coefficients)
+      }
+      ui <- as.vector(y0 - modelFittedValues)
+      invLambda <- pmin(1 / abs(ui), maxInvLambda)
+      loglikNew <- as.numeric(logLik(modelFit))
+      err <- abs(loglikNew - loglikOld)
+      loglikOld <- loglikNew
+    }
   }
   list(coef=modelCoefs, fitted.mod=modelFit, empq=mean(ui < 0), ui=ui,
        weights=invLambda, iter=it, err=err)
