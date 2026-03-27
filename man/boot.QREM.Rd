@@ -2,7 +2,7 @@
 % Please edit documentation in R/QREM.R
 \name{boot.QREM}
 \alias{boot.QREM}
-\title{Bootstrap estimates for the standard errors of the coefficients in a quantile regression model.}
+\title{Bootstrap estimates for the standard errors of QREM coefficients.}
 \usage{
 boot.QREM(
   func,
@@ -31,7 +31,8 @@ boot.QREM(
 
 \item{qn}{The selected quantile. Must be in (0,1).}
 
-\item{n}{The number of samples to be used in the bootstrap.}
+\item{n}{The number of rows to sample. Should equal \code{nrow(dframe0)} for a standard
+non-parametric bootstrap; smaller values sample a subset.}
 
 \item{userwgts}{The user-provided sampling weights (optional. Default=NULL.)}
 
@@ -54,21 +55,31 @@ boot.QREM(
 \item{showEst}{Boolean - whether to show an estimated completion time for the bootstrap. Default=FALSE.}
 }
 \value{
-A matrix of the QR coefficients (B rows).
+A \eqn{B \times p} numeric matrix where each row is the fixed-effects
+  coefficient vector from one bootstrap replicate. Column names match the
+  coefficient names from \code{\link{QREM}}. Replications that produced a
+  coefficient vector of unexpected length (rank-deficient resamples) are
+  silently dropped, so the number of rows may be slightly less than \code{B}.
 }
 \description{
-In the fixed effects case, the bcov function provides less variable,
- and faster estimates through the asymptotic covariance
-  (Bahadur's representation). For mixed models bcov may also be used - it provides
-  good coverage probability in simulations (using the BLUPs for the random
-  effects)
+Runs \code{B} bootstrap replications of \code{\link{QREM}} in parallel
+(using \code{parallel::parLapply}) and returns the full \eqn{B \times p}
+matrix of coefficient vectors, from which standard errors can be obtained
+as \code{apply(result, 2, sd)}.  For fixed-effects models,
+\code{\link{bcov}} provides a faster analytic alternative based on
+Bahadur's representation.  For mixed models, bootstrap SEs are preferred.
 }
 \examples{
 \donttest{
-#data(simdf)
-#qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
-#estBS <- boot.QREM(lm, linmod=y~x*x2 +x3, df = simdf, qn=0.2,
-#    n=nrow(simdf), B=50)
-#apply(estBS,2,sd)
+# Skipped when R CMD check restricts parallel cores
+if (!isTRUE(as.logical(Sys.getenv("_R_CHECK_LIMIT_CORES_", "FALSE")))) {
+  data(simdf)
+  estBS <- boot.QREM(lm, linmod = y ~ x * x2 + x3, dframe0 = simdf,
+                     qn = 0.2, n = nrow(simdf), B = 50)
+  apply(estBS, 2, sd)
 }
+}
+}
+\seealso{
+\code{\link{QREM}}, \code{\link{bcov}}
 }

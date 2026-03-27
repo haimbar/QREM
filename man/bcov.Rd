@@ -36,8 +36,8 @@ and the same formula is applied; only the fixed-effects sub-matrix is returned.
 }
 \examples{
 data(simdf)
-qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
-covmat <- bcov(qremFit,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
+qremFit <- QREM(lm, linmod = y ~ x * x2 + x3, dframe = simdf, qn = 0.2)
+covmat <- bcov(qremFit, linmod = y ~ x * x2 + x3, dframe = simdf, qn = 0.2)
 }
 \seealso{
 \code{\link{QREM}}, \code{\link{boot.QREM}}

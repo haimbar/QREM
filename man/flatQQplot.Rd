@@ -35,19 +35,28 @@ flatQQplot(
 
 \item{plot.it}{A logical variable used to determine whether to show the diagnostic plot (TRUE).}
 }
+\value{
+A list of length \code{length(qns)}, where each element is an
+  \code{htest} object from \code{\link[stats]{prop.test}} testing whether
+  the proportion of observations below the regression line equals
+  \code{qns[i]} in each segment of the predictor. Returns \code{FALSE}
+  (with a \code{warning}) if neither \code{cnum} nor \code{vname} is
+  specified, or if the sample size is too small.
+}
 \description{
 Showing multiple ('flat') QQ plots for different quantiles using a heatmap.
 }
 \examples{
 \donttest{
 data(simdf)
-qns <- seq(0.1,0.9,by=0.1)
-qrfits <- list()
-for (i in 1:length(qns)) {
- qrfits[[i]] <- QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=qns[i])
-}
+qns <- seq(0.1, 0.9, by = 0.1)
+qrfits <- lapply(qns, function(q)
+  QREM(lm, linmod = y ~ x * x2 + x3, dframe = simdf, qn = q))
 pvals <- flatQQplot(dat=simdf, cnum = 2, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
 pvals <- flatQQplot(dat=simdf, cnum = 3, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
 pvals <- flatQQplot(dat=simdf, cnum = 4, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
 }
+}
+\seealso{
+\code{\link{QREM}}, \code{\link{QRdiagnostics}}
 }

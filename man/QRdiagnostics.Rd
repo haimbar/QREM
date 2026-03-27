@@ -20,18 +20,22 @@ QRdiagnostics(X, varname, u_i, qn, plot.it = TRUE, filename = NULL)
 \item{filename}{The pdf file to save the plot. Default is NULL (print to the screen.)}
 }
 \value{
-A list, as follows, plus the marginal deviance:
-\itemize{
-  \item For a continuous predictor, the list is called qqp and contains the output from qqplot().
-  \item For a categorical variable, the list is called qqlvl, and it contains the empirical percentages of points below the regression line, for each level.
-}
+For a continuous predictor: a list with elements \code{x}, \code{y}
+  (the QQ-plot quantile vectors from \code{\link[stats]{qqplot}}) and
+  \code{dev} (the marginal quantile deviance,
+  \eqn{-\sum u_i (\tau - \mathbf{1}_{u_i > 0})}).
+  For a factor predictor: a named list with one numeric entry per factor
+  level (the empirical proportion of observations below the regression line
+  for that level) plus \code{dev}.
+  Returns \code{NULL} with a \code{warning} if residuals are constant, all
+  fall on one side of zero, or \code{X} is neither numeric nor factor.
 }
 \description{
 For a given predictor, create a qq-plot if continuous, or a spinogram if categorical.
 }
 \examples{
 data(simdf)
-qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
-qrdg <- QRdiagnostics(simdf$x, "x",qremFit$ui, 0.2,  plot.it = TRUE)
-qrdg <- QRdiagnostics(simdf$x3, "x3",qremFit$ui, 0.2,  plot.it = TRUE)
+qremFit <- QREM(lm, linmod = y ~ x * x2 + x3, dframe = simdf, qn = 0.2)
+qrdg <- QRdiagnostics(simdf$x, "x", qremFit$ui, 0.2, plot.it = FALSE)
+qrdg <- QRdiagnostics(simdf$x3, "x3", qremFit$ui, 0.2, plot.it = FALSE)
 }

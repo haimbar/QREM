@@ -107,19 +107,21 @@ QREM <- function (func, linmod, dframe, qn, userwgts = NULL,..., err = 10,
        weights=invLambda, iter=it, err=err)
 }
 
-#' Bootstrap estimates for the standard errors of the coefficients in a quantile regression model.
+#' Bootstrap estimates for the standard errors of QREM coefficients.
 #'
-#' In the fixed effects case, the bcov function provides less variable,
-#'  and faster estimates through the asymptotic covariance
-#'   (Bahadur's representation). For mixed models bcov may also be used - it provides
-#'   good coverage probability in simulations (using the BLUPs for the random
-#'   effects)
+#' Runs \code{B} bootstrap replications of \code{\link{QREM}} in parallel
+#' (using \code{parallel::parLapply}) and returns the full \eqn{B \times p}
+#' matrix of coefficient vectors, from which standard errors can be obtained
+#' as \code{apply(result, 2, sd)}.  For fixed-effects models,
+#' \code{\link{bcov}} provides a faster analytic alternative based on
+#' Bahadur's representation.  For mixed models, bootstrap SEs are preferred.
 #'
 #' @param func The fitting function (lm, lmer, gam).
 #' @param linmod A formula (the linear model for fitting in the M step).
 #' @param dframe0 The design matrix. A data frame containing the columns in the formula specified in linmod.
 #' @param qn The selected quantile. Must be in (0,1).
-#' @param n The number of samples to be used in the bootstrap.
+#' @param n The number of rows to sample. Should equal \code{nrow(dframe0)} for a standard
+#'   non-parametric bootstrap; smaller values sample a subset.
 #' @param userwgts The user-provided sampling weights (optional. Default=NULL.)
 #' @param ... Any arguments to be passed to func (except for the formula and weights)
 #' @param sampleFrom A subset of rows in dframe0 to sample from (for mixed models). Default=NULL.
@@ -130,17 +132,24 @@ QREM <- function (func, linmod, dframe, qn, userwgts = NULL,..., err = 10,
 #' @param maxInvLambda The maximum value of the weight for WLS fitting (default=300).
 #' @param seedno The seed for reproducibility (default=71371).
 #' @param showEst Boolean - whether to show an estimated completion time for the bootstrap. Default=FALSE.
-#' @return A matrix of the QR coefficients (B rows).
+#' @return A \eqn{B \times p} numeric matrix where each row is the fixed-effects
+#'   coefficient vector from one bootstrap replicate. Column names match the
+#'   coefficient names from \code{\link{QREM}}. Replications that produced a
+#'   coefficient vector of unexpected length (rank-deficient resamples) are
+#'   silently dropped, so the number of rows may be slightly less than \code{B}.
+#' @seealso \code{\link{QREM}}, \code{\link{bcov}}
 #' @importFrom parallel detectCores makeCluster parLapply clusterExport stopCluster
 #' @importFrom gam gam
 #' @export
 #' @examples
 #' \donttest{
-#' #data(simdf)
-#' #qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
-#' #estBS <- boot.QREM(lm, linmod=y~x*x2 +x3, df = simdf, qn=0.2,
-#' #    n=nrow(simdf), B=50)
-#' #apply(estBS,2,sd)
+#' # Skipped when R CMD check restricts parallel cores
+#' if (!isTRUE(as.logical(Sys.getenv("_R_CHECK_LIMIT_CORES_", "FALSE")))) {
+#'   data(simdf)
+#'   estBS <- boot.QREM(lm, linmod = y ~ x * x2 + x3, dframe0 = simdf,
+#'                      qn = 0.2, n = nrow(simdf), B = 50)
+#'   apply(estBS, 2, sd)
+#' }
 #' }
 boot.QREM <- function(func, linmod, dframe0, qn, n, userwgts=NULL,...,
                       sampleFrom = NULL, B = 100, err = 10,
@@ -223,8 +232,8 @@ boot.QREM <- function(func, linmod, dframe0, qn, n, userwgts=NULL,...,
 #' @export
 #' @examples
 #' data(simdf)
-#' qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
-#' covmat <- bcov(qremFit,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
+#' qremFit <- QREM(lm, linmod = y ~ x * x2 + x3, dframe = simdf, qn = 0.2)
+#' covmat <- bcov(qremFit, linmod = y ~ x * x2 + x3, dframe = simdf, qn = 0.2)
 bcov <- function (qremFit, linmod, dframe, qn, userwgts=NULL) {
   ui <- qremFit$ui
   empq <- quantile(ui, qn)
@@ -270,18 +279,22 @@ bcov <- function (qremFit, linmod, dframe, qn, userwgts=NULL) {
 #' @param qn The quantile used in the regression.
 #' @param plot.it Boolean, if TRUE, will show the histogram of the residuals and the fitted kernel density estimate (default=TRUE).
 #' @param filename The pdf file to save the plot. Default is NULL (print to the screen.)
-#' @return A list, as follows, plus the marginal deviance:
-#' \itemize{
-#'   \item For a continuous predictor, the list is called qqp and contains the output from qqplot().
-#'   \item For a categorical variable, the list is called qqlvl, and it contains the empirical percentages of points below the regression line, for each level.
-#' }
+#' @return For a continuous predictor: a list with elements \code{x}, \code{y}
+#'   (the QQ-plot quantile vectors from \code{\link[stats]{qqplot}}) and
+#'   \code{dev} (the marginal quantile deviance,
+#'   \eqn{-\sum u_i (\tau - \mathbf{1}_{u_i > 0})}).
+#'   For a factor predictor: a named list with one numeric entry per factor
+#'   level (the empirical proportion of observations below the regression line
+#'   for that level) plus \code{dev}.
+#'   Returns \code{NULL} with a \code{warning} if residuals are constant, all
+#'   fall on one side of zero, or \code{X} is neither numeric nor factor.
 #' @importFrom graphics abline axis grid hist lines plot rect text
 #' @export
 #' @examples
 #' data(simdf)
-#' qremFit <-  QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=0.2)
-#' qrdg <- QRdiagnostics(simdf$x, "x",qremFit$ui, 0.2,  plot.it = TRUE)
-#' qrdg <- QRdiagnostics(simdf$x3, "x3",qremFit$ui, 0.2,  plot.it = TRUE)
+#' qremFit <- QREM(lm, linmod = y ~ x * x2 + x3, dframe = simdf, qn = 0.2)
+#' qrdg <- QRdiagnostics(simdf$x, "x", qremFit$ui, 0.2, plot.it = FALSE)
+#' qrdg <- QRdiagnostics(simdf$x3, "x3", qremFit$ui, 0.2, plot.it = FALSE)
 QRdiagnostics <- function(X, varname, u_i, qn,  plot.it=TRUE, filename=NULL) {
   n <- length(u_i)
   empq <- quantile(u_i,qn)
@@ -362,17 +375,22 @@ QRdiagnostics <- function(X, varname, u_i, qn,  plot.it=TRUE, filename=NULL) {
 #' @param sdevs Used to determine the ranges for critical values under the null model and thus the range of colors in the heatmap (default= 4).
 #' @param filename The pdf file to save the plot. Default is NULL (print to the screen.)
 #' @param plot.it A logical variable used to determine whether to show the diagnostic plot (TRUE).
+#' @return A list of length \code{length(qns)}, where each element is an
+#'   \code{htest} object from \code{\link[stats]{prop.test}} testing whether
+#'   the proportion of observations below the regression line equals
+#'   \code{qns[i]} in each segment of the predictor. Returns \code{FALSE}
+#'   (with a \code{warning}) if neither \code{cnum} nor \code{vname} is
+#'   specified, or if the sample size is too small.
+#' @seealso \code{\link{QREM}}, \code{\link{QRdiagnostics}}
 #' @importFrom grDevices topo.colors pdf dev.off
 #' @importFrom stats prop.test qnorm
 #' @export
 #' @examples
 #' \donttest{
 #' data(simdf)
-#' qns <- seq(0.1,0.9,by=0.1)
-#' qrfits <- list()
-#' for (i in 1:length(qns)) {
-#'  qrfits[[i]] <- QREM(lm,linmod=y~x*x2 +x3, df=simdf, qn=qns[i])
-#' }
+#' qns <- seq(0.1, 0.9, by = 0.1)
+#' qrfits <- lapply(qns, function(q)
+#'   QREM(lm, linmod = y ~ x * x2 + x3, dframe = simdf, qn = q))
 #' pvals <- flatQQplot(dat=simdf, cnum = 2, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
 #' pvals <- flatQQplot(dat=simdf, cnum = 3, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
 #' pvals <- flatQQplot(dat=simdf, cnum = 4, qrfits=qrfits, qns=qns, maxm = 20, plot.it = TRUE)
@@ -499,6 +517,16 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
 #' @param maxRep The maximum number of iterations between QREM and fitSEMMS. Default=40.
 #' @param initWithEdgeFinder Determines whether to use the edgefinder package to find highly correlated pairs of predictors (default=FALSE).
 #' @param mincor To be passed to the fitSEMMS function (the minimum correlation coefficient between pairs of putative variable, over which they are considered highly correlated). Default is 0.75.
+#' @return A list with two elements:
+#' \itemize{
+#'   \item \code{fittedSEMMS}: The SEMMS model object from the final iteration
+#'     (output of \code{fitSEMMS}), containing the selected predictor indices
+#'     in \code{$gam.out$nn}.
+#'   \item \code{fittedQREM}: The QREM fit from the final iteration
+#'     (output of \code{\link{QREM}}), or \code{NULL} if SEMMS selected no
+#'     predictors.
+#' }
+#' @seealso \code{\link{QREM}}, \code{\link{bcov}}
 #' @importFrom SEMMS fitSEMMS readInputFile
 #' @importFrom edgefinder edgefinder graphComponents
 #' @importFrom Matrix Diagonal
@@ -511,7 +539,7 @@ flatQQplot <- function(dat, cnum=NULL, vname=NULL, qrfits, qns,
 #' dfsemms <- simLargeP[,c(1, 1+res$fittedSEMMS$gam.out$nn)]
 #' qremFit <- QREM(lm, y~., dfsemms, qn=qn)
 #' ests <- rbind(qremFit$coef$beta,
-#'          sqrt(diag(bcov(qremFit,linmod=y~., df=dfsemms, qn=qn))))
+#'          sqrt(diag(bcov(qremFit, linmod = y ~ ., dframe = dfsemms, qn = qn))))
 #' rownames(ests) <- c("Estimate","s.d")
 #' }
 QREM_vs <- function(inputData, ycol, Zcols, Xcols=c(), qn, nn=5, nnset=NULL, maxRep=40,initWithEdgeFinder=FALSE, mincor = 0.75) {

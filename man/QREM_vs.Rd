@@ -38,6 +38,17 @@ QREM_vs(
 
 \item{mincor}{To be passed to the fitSEMMS function (the minimum correlation coefficient between pairs of putative variable, over which they are considered highly correlated). Default is 0.75.}
 }
+\value{
+A list with two elements:
+\itemize{
+  \item \code{fittedSEMMS}: The SEMMS model object from the final iteration
+    (output of \code{fitSEMMS}), containing the selected predictor indices
+    in \code{$gam.out$nn}.
+  \item \code{fittedQREM}: The QREM fit from the final iteration
+    (output of \code{\link{QREM}}), or \code{NULL} if SEMMS selected no
+    predictors.
+}
+}
 \description{
 Use the SEMMS package to perform variable selection. Iteratively alternate between QREM and fitSEMMS.
 }
@@ -49,7 +60,10 @@ res <- QREM_vs(simLargeP, 1, 2:51, qn=qn)
 dfsemms <- simLargeP[,c(1, 1+res$fittedSEMMS$gam.out$nn)]
 qremFit <- QREM(lm, y~., dfsemms, qn=qn)
 ests <- rbind(qremFit$coef$beta,
-         sqrt(diag(bcov(qremFit,linmod=y~., df=dfsemms, qn=qn))))
+         sqrt(diag(bcov(qremFit, linmod = y ~ ., dframe = dfsemms, qn = qn))))
 rownames(ests) <- c("Estimate","s.d")
 }
+}
+\seealso{
+\code{\link{QREM}}, \code{\link{bcov}}
 }
